@@ -139,8 +139,9 @@ def juntar_dados_hist(data, autores, nome='Nome do docente', qte="Qte"):
 sumario_autores = sumarizar_autores(producoes)
 
 def plotCapela(data, nome='Nome do docente', qte='Qte'):
-  d = data.loc[:, ['Cod PPG', 'Nome do docente', 'Qte']].groupby(['Cod PPG', 'Nome do docente']).sum().reset_index().sort_values(by=["Cod PPG", "Qte"], ascending=True)
-  r = pd.merge(d, siglas, on=['Cod PPG'], how="left").sort_values(by="Sigla", kind="stable")
+  d = data.loc[:, ['Cod PPG', 'Nome do docente', 'Qte', 'Gini']].groupby(['Cod PPG', 'Nome do docente']).sum().reset_index().sort_values(by=["Cod PPG", "Qte"], ascending=True)
+  d = d.merge(siglas, on=['Cod PPG'], how="left").sort_values(by="Sigla", kind="stable")
+  r = d.sort_values(by="Gini", kind="stable", ascending=False)
   r = r.assign(idx=range(len(r.index)))
   idxgrp = r.loc[:, ['Sigla', 'idx']].groupby('Sigla')
   idxmin = idxgrp.min().reset_index().rename({'idx': 'min'})
@@ -194,33 +195,27 @@ def gini(array):
     return ((np.sum((2 * index - n  - 1) * array)) / (n * np.sum(array))) #Gini coefficient
 
 def plotHist(data, col='Gini', addmedian=False):
-  wd = data
-  wd = pd.merge(wd, siglas, on=['Cod PPG'], how='left')
-  order=wd[['Sigla', col]].groupby(by='Sigla')[col].max().sort_values().keys().tolist()
-  order.reverse()
-  sigla_cat = pd.Categorical(wd['Sigla'], categories=order)
-  wd = wd.assign(Sigla = sigla_cat)
-  gg = (
+    wd = data
+    wd = pd.merge(wd, siglas, on=['Cod PPG'], how='left')
+    order=wd[['Sigla', col]] \
+    .groupby(by='Sigla').max().reset_index() \
+    .sort_values(by=col, ascending=False)['Sigla'].values
+    #return order
+    #order.reverse()
+    sigla_cat = pd.Categorical(wd['Sigla'], categories=order)
+    wd = wd.assign(Sigla = sigla_cat)
+    wd = wd[['Sigla', 'Gini']].groupby(['Sigla']).max().reset_index()
+    #return wd
+    gg = (
       ggplot(wd)
       + aes(x='Sigla', y=col)
       + geom_bar(stat='identity', fill='blue', color='blue')
       + theme(figure_size=(16.0, 9.0))
       + theme(axis_text_x=element_text(angle=90, size=10))
-  )
-  if addmedian:
-    gg = adicionar_percentis(gg, wd, col="Gini")
-    return gg
-    parts = [0, 0.25, 0.5, 0.75, 1]
-    m = [r[col].quantile(p) for p in parts]
-    t = pd.DataFrame(data=[[1, r[col].quantile(p),'{0:2.0f}%'.format(p*100)] for p in parts], columns=['x', 'y', 'l'])
-    color='black'
-    #return t
-    gg = (
-        gg
-        + geom_hline(t, aes(yintercept = 'y'), color=color)
-        + geom_label(t, aes(x='x', y='y', label='l'), ha='left', va='top', color=color)
     )
-  return gg
+    if addmedian:
+        gg = adicionar_percentis(gg, wd, col="Gini")
+    return gg
 
 autores_per = sumario_autores[
   (sumario_autores['Subtipo'].isin(["ARTIGO EM PERIÓDICO"])) & 
@@ -232,23 +227,26 @@ docs = docentes \
          [docentes['Categoria'] == 'PERMANENTE'] \
          .merge(academicos, on='Cod PPG', how='inner')
 auts = sumario_autores[
-         (sumario_autores['Subtipo'].isin(["ARTIGO EM PERIÓDICO"])) & 
-         (sumario_autores['Estrato'].isin(estratosRestritos)) &
+         #(sumario_autores['Subtipo'].isin(["ARTIGO EM PERIÓDICO"])) & 
+         #(sumario_autores['Estrato'].isin(estratosRestritos)) &
+         (sumario_autores['Subtipo'].isin(["ARTIGO EM PERIÓDICO", "TRABALHO EM ANAIS"])) & 
+         #(sumario_autores['Estrato'].isin(estratosRestritos)) &
+         (sumario_autores['Estrato'].isin(estratos)) &
          (sumario_autores['Natureza'] == 'TRABALHO COMPLETO')
        ]
 
-gg = plotCapela( juntar_dados_hist(docs, auts)) \
-     + labs(x="Programas", y="Quantidade de Artigos em Periódicos em Estrato Restrito") \
-     + ggtitle('Distribuição Interna da Publicações dos Programas entre os Docentes Permanentes')
+wd = juntar_dados_hist(docs, auts)
+wd = wd.merge(juntar_dados_gini(docs, auts), on='Cod PPG', how='inner')
+
+gg = plotCapela(wd) \
+       + labs(x="Programas", y="Quantidade de Artigos em Periódicos e Eventos") \
+       + ggtitle('Distribuição Interna da Publicações dos Programas entre os Docentes Permanentes')
 
 gg.save(filename='charts/concentracao-producacao.pdf')
 
-gg = plotHist(juntar_dados_gini(
-       docs, 
-       auts
-     ), addmedian=True) \
-     + labs(x="Programas", y="Gini da Quantidade de Artigos em Periódicos em Estrato Restrito") \
-     + ggtitle('Gini da Distribuição Interna da Publicações dos Programas entre os Docentes Permanentes') \
-     + scale_y_continuous(limits=(0, 1))
+gg = plotHist(wd, addmedian=True) \
+       + labs(x="Programas", y="Gini da Quantidade de Artigos em Periódicos e Eventos") \
+       + ggtitle('Gini da Distribuição Interna da Publicações dos Programas entre os Docentes Permanentes') \
+       + scale_y_continuous(limits=(0, 1))
     
 gg.save(filename='charts/concentracao-producacao-gini.pdf')
